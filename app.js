@@ -10,6 +10,8 @@ let isExamActive = false;
 let tabSwitchCount = 0;
 let tabSwitchLog = [];
 let securityEventLog = [];
+let lastFocusLoss = null;
+let suspiciousActivityDetected = false;
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwP2m20Mb3Jkmp351o-l4NV9j7B8bDytq229agCj53j3OZV0jX-ONCkv7ES03zARvtsWg/exec";
 
@@ -40,10 +42,8 @@ function toggleTheme() {
   document.documentElement.setAttribute("data-theme", currentTheme);
   localStorage.setItem("examTheme", currentTheme);
   updateThemeIcon();
-  // Reapply watermark for theme consistency
   addWatermark();
 
-  // Smooth transition effect
   document.body.style.transition = "all 0.3s ease";
   setTimeout(() => {
     document.body.style.transition = "";
@@ -90,9 +90,9 @@ function setupInputValidation() {
   });
 }
 
-// Security Features: Prevent screenshots, right-click, dev tools, and track tab switching
+// Security Features
 function setupSecurityFeatures() {
-  // Disable right-click context menu
+  // Disable right-click
   document.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     showNotification("Right-click is disabled to protect exam content.", "warning");
@@ -101,30 +101,39 @@ function setupSecurityFeatures() {
 
   // Detect screenshot and dev tools shortcuts
   document.addEventListener("keydown", (e) => {
-    // Screenshot shortcuts: PrintScreen, Ctrl+Shift+S, Cmd+Shift+3/4
+    // Screenshot shortcuts
     if (
       e.key === "PrintScreen" ||
       (e.ctrlKey && e.shiftKey && e.key === "S") ||
-      (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4"))
+      (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4")) ||
+      (e.metaKey && e.key === "s") ||
+      (e.getModifierState && e.getModifierState("CapsLock") && e.key === "s")
     ) {
       e.preventDefault();
       showNotification("Screenshots are not allowed during the exam.", "error");
       logSecurityEvent(`Screenshot attempt detected (Key: ${e.key})`);
     }
 
-    // Dev tools shortcuts: F12, Ctrl+Shift+I, Ctrl+Shift+J, Cmd+Opt+I/J
+    // Dev tools shortcuts
     if (
       e.key === "F12" ||
-      (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J")) ||
+      (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) ||
       (e.metaKey && e.altKey && (e.key === "I" || e.key === "J"))
     ) {
       e.preventDefault();
       showNotification("Developer tools are not allowed during the exam.", "error");
       logSecurityEvent(`Dev tools attempt detected (Key: ${e.key})`);
     }
+
+    // Copy-paste shortcuts
+    if (e.ctrlKey && (e.key === "c" || e.key === "v")) {
+      e.preventDefault();
+      showNotification("Copy-paste is disabled during the exam.", "warning");
+      logSecurityEvent(`Copy-paste attempt detected (Key: ${e.key})`);
+    }
   });
 
-  // Detect tab switching or window focus changes
+  // Detect tab switching and focus loss
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden" && isExamActive) {
       tabSwitchCount++;
@@ -132,23 +141,39 @@ function setupSecurityFeatures() {
       const logEntry = `Tab switch or focus loss detected at ${timestamp}`;
       tabSwitchLog.push(logEntry);
       showNotification(
-        "Warning: Switching tabs or applications is not allowed during the exam.",
+        "Warning: Switching tabs or applications is not allowed. This may indicate AI tool usage.",
         "warning"
       );
       logSecurityEvent(logEntry);
+
+      // Flag suspicious activity if frequent switches
+      if (lastFocusLoss && Date.now() - lastFocusLoss < 5000) {
+        suspiciousActivityDetected = true;
+        showNotification(
+          "Frequent tab switching detected. AI tool usage is prohibited.",
+          "error"
+        );
+        logSecurityEvent("Suspicious activity: Frequent tab switches");
+      }
+      lastFocusLoss = Date.now();
+
+      // Apply blur effect
+      applyBlurEffect(true);
+    } else if (document.visibilityState === "visible" && isExamActive) {
+      applyBlurEffect(false);
     }
   });
 
-  // Detect developer tools being open (basic heuristic)
+  // Detect developer tools
   let devToolsOpen = false;
   const devToolsCheck = () => {
-    const threshold = 160; // Typical height/width difference when dev tools are open
+    const threshold = 160;
     const widthDiff = window.outerWidth - window.innerWidth;
     const heightDiff = window.outerHeight - window.innerHeight;
     if (widthDiff > threshold || heightDiff > threshold) {
       if (!devToolsOpen) {
         devToolsOpen = true;
-        showNotification("Developer tools detected. Please close them to continue.", "error");
+        showNotification("Developer tools detected. Please close them.", "error");
         logSecurityEvent("Developer tools detected");
       }
     } else {
@@ -156,27 +181,27 @@ function setupSecurityFeatures() {
     }
   };
 
-  // Check for dev tools periodically
   if (isExamActive) {
     setInterval(devToolsCheck, 1000);
   }
 
-  // Add watermark
-  addWatermark();
-
-  // Prevent text selection and copying
+  // Prevent text selection
   document.addEventListener("selectstart", (e) => {
     e.preventDefault();
     showNotification("Text selection is disabled during the exam.", "warning");
     logSecurityEvent("Text selection attempt detected");
   });
 
-  // Prevent drag-and-drop (e.g., dragging content to snipping tools)
+  // Prevent drag-and-drop
   document.addEventListener("dragstart", (e) => {
     e.preventDefault();
     showNotification("Dragging content is not allowed during the exam.", "warning");
     logSecurityEvent("Drag attempt detected");
   });
+
+  // Update watermark periodically
+  setInterval(addWatermark, 60000); // Update every minute
+  addWatermark();
 }
 
 // Log security events
@@ -186,23 +211,31 @@ function logSecurityEvent(event) {
   console.log(`Security Event: ${event}`);
   // Optionally, send to server if online
   if (isOnline) {
-    // Example: fetch(`${API_URL}?action=logEvent&event=${encodeURIComponent(event)}`);
+    // fetch(`${API_URL}?action=logEvent&event=${encodeURIComponent(event)}`);
   }
 }
 
-// // Add watermark
-// function addWatermark() {
-//   // Remove existing watermark if any
-//   const existingWatermark = document.querySelector(".watermark");
-//   if (existingWatermark) {
-//     existingWatermark.remove();
-//   }
+// Dynamic watermark
+function addWatermark() {
+  const existingWatermark = document.querySelector(".watermark");
+  if (existingWatermark) {
+    existingWatermark.remove();
+  }
 
-//   const watermark = document.createElement("div");
-//   watermark.className = "watermark";
-//   watermark.textContent = `Exam ID: ${currentExamId || "YHA"} | User: Anonymous | Do Not Copy`;
-//   document.body.appendChild(watermark);
-// }
+  const watermark = document.createElement("div");
+  watermark.className = "watermark";
+  watermark.textContent = `Exam ID: ${currentExamId || "YHA"} | Timestamp: ${new Date().toLocaleString()} | Do Not Share`;
+  document.body.appendChild(watermark);
+}
+
+// Apply blur effect on focus loss
+function applyBlurEffect(blur) {
+  const examSection = document.getElementById("examSection");
+  if (examSection) {
+    examSection.style.filter = blur ? "blur(5px)" : "none";
+    examSection.style.pointerEvents = blur ? "none" : "auto";
+  }
+}
 
 // Start exam function
 async function startExam() {
@@ -213,13 +246,11 @@ async function startExam() {
     return;
   }
 
-  // Validate exam ID format
   if (currentExamId.length < 2) {
     showNotification("Please enter a valid Exam ID", "error");
     return;
   }
 
-  // Request fullscreen mode
   if (document.documentElement.requestFullscreen) {
     try {
       await document.documentElement.requestFullscreen();
@@ -236,8 +267,8 @@ async function startExam() {
   tabSwitchCount = 0;
   tabSwitchLog = [];
   securityEventLog = [];
+  suspiciousActivityDetected = false;
 
-  // Initialize timer (1 hour default)
   timeRemaining = 3600;
   startTimer();
 
@@ -266,7 +297,6 @@ function showExamSection() {
   document.getElementById("examSection").style.display = "block";
   document.getElementById("currentExamId").textContent = currentExamId;
   updateProgress();
-  // Reapply watermark
   addWatermark();
 }
 
@@ -554,10 +584,11 @@ function prevQuestion() {
 function finishExam() {
   isExamActive = false;
   clearInterval(examTimer);
+  applyBlurEffect(false);
   showExamCompletionReport();
 }
 
-// Show exam completion report with security logs
+// Show exam completion report
 function showExamCompletionReport() {
   const existingModal = document.getElementById("examReportModal");
   if (existingModal) {
@@ -583,6 +614,11 @@ function showExamCompletionReport() {
         </div>
         <div class="modal-body">
           <p>Congratulations! You have successfully completed the exam.</p>
+          ${
+            suspiciousActivityDetected
+              ? '<p class="text-danger">Warning: Suspicious activity detected (possible AI tool usage).</p>'
+              : ""
+          }
           <div class="exam-summary">
             <div class="summary-item">
               <span class="label">Exam ID:</span>
@@ -635,7 +671,6 @@ function showExamCompletionReport() {
 
   document.body.appendChild(modal);
 
-  // Exit fullscreen mode if active
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(console.error);
   }
@@ -724,15 +759,17 @@ const notificationStyles = `
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%) rotate(-45deg);
-  font-size: 1.5rem;
-  color: rgba(0, 0, 0, 0.1);
+  font-size: 2rem;
+  font-weight: bold;
+  color: rgba(0, 0, 0, 0.2);
   pointer-events: none;
   z-index: 999;
   white-space: nowrap;
+  text-transform: uppercase;
 }
 
 [data-theme="dark"] .watermark {
-  color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.2);
 }
 
 .pdf-viewer.fullscreen {
