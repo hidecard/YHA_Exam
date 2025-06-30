@@ -45,9 +45,9 @@
   --gray-800: #e0e0e5;
   --gray-900: #f0f0f5;
   --dark-color: #ffffff;
-  --primary-gradient: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
-  --secondary-gradient: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
-  --success-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --primary-gradient: linear-gradient(135deg, #eaa666 0%, #eb5a00 100%);
+  --secondary-gradient: linear-gradient(135deg, #ea6315 0%, #f5576c 100%);
+  --success-gradient: linear-gradient(135deg, #d28033 0%, #dc7200 100%);
 }
 
 /* Global Styles */

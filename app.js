@@ -42,7 +42,6 @@ function toggleTheme() {
   document.documentElement.setAttribute("data-theme", currentTheme);
   localStorage.setItem("examTheme", currentTheme);
   updateThemeIcon();
-  addWatermark();
 
   document.body.style.transition = "all 0.3s ease";
   setTimeout(() => {
@@ -99,19 +98,23 @@ function setupSecurityFeatures() {
     logSecurityEvent("Right-click attempt detected");
   });
 
-  // Detect screenshot and dev tools shortcuts
+  // Detect screenshot and Snipping Tool shortcuts
   document.addEventListener("keydown", (e) => {
-    // Screenshot shortcuts
+    // Screenshot and Snipping Tool shortcuts
     if (
       e.key === "PrintScreen" ||
-      (e.ctrlKey && e.shiftKey && e.key === "S") ||
-      (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4")) ||
-      (e.metaKey && e.key === "s") ||
-      (e.getModifierState && e.getModifierState("CapsLock") && e.key === "s")
+      (e.ctrlKey && e.shiftKey && e.key === "S") || // Ctrl+Shift+S
+      (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4")) || // macOS screenshots
+      (e.metaKey && e.key === "s") || // Cmd+S
+      (e.getModifierState && e.getModifierState("CapsLock") && e.key === "s") || // CapsLock+S
+      (e.metaKey && e.shiftKey && e.key === "S") || // Win+Shift+S (Snipping Tool)
+      (e.altKey && e.key === "PrintScreen") || // Alt+PrintScreen
+      (e.ctrlKey && e.key === "S") || // Ctrl+S
+      ( e.ctrlKey && e.key === "s" )
     ) {
       e.preventDefault();
-      showNotification("Screenshots are not allowed during the exam.", "error");
-      logSecurityEvent(`Screenshot attempt detected (Key: ${e.key})`);
+      showNotification("Screenshots and Snipping Tool are not allowed during the exam.", "error");
+      logSecurityEvent(`Screenshot/Snipping Tool attempt detected (Key: ${e.key})`);
     }
 
     // Dev tools shortcuts
@@ -138,10 +141,10 @@ function setupSecurityFeatures() {
     if (document.visibilityState === "hidden" && isExamActive) {
       tabSwitchCount++;
       const timestamp = new Date().toLocaleString();
-      const logEntry = `Tab switch or focus loss detected at ${timestamp}`;
+      const logEntry = `Tab switch or focus loss (possible Snipping Tool/AI tool) detected at ${timestamp}`;
       tabSwitchLog.push(logEntry);
       showNotification(
-        "Warning: Switching tabs or applications is not allowed. This may indicate AI tool usage.",
+        "Warning: Switching tabs or applications is not allowed. This may indicate Snipping Tool or AI tool usage.",
         "warning"
       );
       logSecurityEvent(logEntry);
@@ -150,10 +153,10 @@ function setupSecurityFeatures() {
       if (lastFocusLoss && Date.now() - lastFocusLoss < 5000) {
         suspiciousActivityDetected = true;
         showNotification(
-          "Frequent tab switching detected. AI tool usage is prohibited.",
+          "Frequent tab switching detected. Snipping Tool and AI tool usage are prohibited.",
           "error"
         );
-        logSecurityEvent("Suspicious activity: Frequent tab switches");
+        logSecurityEvent("Suspicious activity: Frequent tab switches (possible Snipping Tool/AI tool)");
       }
       lastFocusLoss = Date.now();
 
@@ -172,7 +175,7 @@ function setupSecurityFeatures() {
     const heightDiff = window.outerHeight - window.innerHeight;
     if (widthDiff > threshold || heightDiff > threshold) {
       if (!devToolsOpen) {
-        devToolsOpen = true;
+        devToolsOpen = true可在
         showNotification("Developer tools detected. Please close them.", "error");
         logSecurityEvent("Developer tools detected");
       }
@@ -198,10 +201,6 @@ function setupSecurityFeatures() {
     showNotification("Dragging content is not allowed during the exam.", "warning");
     logSecurityEvent("Drag attempt detected");
   });
-
-  // Update watermark periodically
-  setInterval(addWatermark, 60000); // Update every minute
-  addWatermark();
 }
 
 // Log security events
@@ -215,24 +214,11 @@ function logSecurityEvent(event) {
   }
 }
 
-// Dynamic watermark
-function addWatermark() {
-  const existingWatermark = document.querySelector(".watermark");
-  if (existingWatermark) {
-    existingWatermark.remove();
-  }
-
-  const watermark = document.createElement("div");
-  watermark.className = "watermark";
-  watermark.textContent = `Exam ID: ${currentExamId || "YHA"} | Timestamp: ${new Date().toLocaleString()} | Do Not Share`;
-  document.body.appendChild(watermark);
-}
-
 // Apply blur effect on focus loss
 function applyBlurEffect(blur) {
   const examSection = document.getElementById("examSection");
   if (examSection) {
-    examSection.style.filter = blur ? "blur(5px)" : "none";
+    examSection.style.filter = blur ? "blur(8px)" : "none";
     examSection.style.pointerEvents = blur ? "none" : "auto";
   }
 }
@@ -249,16 +235,6 @@ async function startExam() {
   if (currentExamId.length < 2) {
     showNotification("Please enter a valid Exam ID", "error");
     return;
-  }
-
-  if (document.documentElement.requestFullscreen) {
-    try {
-      await document.documentElement.requestFullscreen();
-      showNotification("Exam started in fullscreen mode for security.", "info");
-    } catch (err) {
-      console.error("Fullscreen request failed:", err);
-      showNotification("Fullscreen mode recommended for exam security.", "warning");
-    }
   }
 
   showLoading();
@@ -297,7 +273,6 @@ function showExamSection() {
   document.getElementById("examSection").style.display = "block";
   document.getElementById("currentExamId").textContent = currentExamId;
   updateProgress();
-  addWatermark();
 }
 
 // Timer functions
@@ -616,7 +591,7 @@ function showExamCompletionReport() {
           <p>Congratulations! You have successfully completed the exam.</p>
           ${
             suspiciousActivityDetected
-              ? '<p class="text-danger">Warning: Suspicious activity detected (possible AI tool usage).</p>'
+              ? '<p class="text-danger">Warning: Suspicious activity detected (possible Snipping Tool or AI tool usage).</p>'
               : ""
           }
           <div class="exam-summary">
@@ -670,10 +645,6 @@ function showExamCompletionReport() {
   `;
 
   document.body.appendChild(modal);
-
-  if (document.fullscreenElement) {
-    document.exitFullscreen().catch(console.error);
-  }
 }
 
 // Restart exam
@@ -712,7 +683,7 @@ function getNotificationIcon(type) {
   return icons[type] || icons.info;
 }
 
-// Notification and watermark styles
+// Notification styles
 const notificationStyles = `
 .notification-toast {
   position: fixed;
@@ -752,36 +723,6 @@ const notificationStyles = `
 
 .notification-info {
   background: var(--primary-color);
-}
-
-.watermark {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) rotate(-45deg);
-  font-size: 2rem;
-  font-weight: bold;
-  color: rgba(0, 0, 0, 0.2);
-  pointer-events: none;
-  z-index: 999;
-  white-space: nowrap;
-  text-transform: uppercase;
-}
-
-[data-theme="dark"] .watermark {
-  color: rgba(255, 255, 255, 0.2);
-}
-
-.pdf-viewer.fullscreen {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: var(--light-color);
-  z-index: 9999;
-  padding: 2rem;
-  overflow-y: auto;
 }
 
 .pdf-viewer canvas {
