@@ -7,6 +7,9 @@ let examTimer = null;
 let timeRemaining = 3600; // 1 hour in seconds
 let isOnline = navigator.onLine;
 let isExamActive = false;
+let tabSwitchCount = 0;
+let tabSwitchLog = [];
+let securityEventLog = [];
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwP2m20Mb3Jkmp351o-l4NV9j7B8bDytq229agCj53j3OZV0jX-ONCkv7ES03zARvtsWg/exec";
 
@@ -16,6 +19,7 @@ document.addEventListener("DOMContentLoaded", function () {
   hideLoading();
   setupInputValidation();
   setupOfflineMode();
+  setupSecurityFeatures();
 
   // Register service worker for offline support
   if ("serviceWorker" in navigator) {
@@ -36,6 +40,8 @@ function toggleTheme() {
   document.documentElement.setAttribute("data-theme", currentTheme);
   localStorage.setItem("examTheme", currentTheme);
   updateThemeIcon();
+  // Reapply watermark for theme consistency
+  addWatermark();
 
   // Smooth transition effect
   document.body.style.transition = "all 0.3s ease";
@@ -84,6 +90,120 @@ function setupInputValidation() {
   });
 }
 
+// Security Features: Prevent screenshots, right-click, dev tools, and track tab switching
+function setupSecurityFeatures() {
+  // Disable right-click context menu
+  document.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    showNotification("Right-click is disabled to protect exam content.", "warning");
+    logSecurityEvent("Right-click attempt detected");
+  });
+
+  // Detect screenshot and dev tools shortcuts
+  document.addEventListener("keydown", (e) => {
+    // Screenshot shortcuts: PrintScreen, Ctrl+Shift+S, Cmd+Shift+3/4
+    if (
+      e.key === "PrintScreen" ||
+      (e.ctrlKey && e.shiftKey && e.key === "S") ||
+      (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4"))
+    ) {
+      e.preventDefault();
+      showNotification("Screenshots are not allowed during the exam.", "error");
+      logSecurityEvent(`Screenshot attempt detected (Key: ${e.key})`);
+    }
+
+    // Dev tools shortcuts: F12, Ctrl+Shift+I, Ctrl+Shift+J, Cmd+Opt+I/J
+    if (
+      e.key === "F12" ||
+      (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J")) ||
+      (e.metaKey && e.altKey && (e.key === "I" || e.key === "J"))
+    ) {
+      e.preventDefault();
+      showNotification("Developer tools are not allowed during the exam.", "error");
+      logSecurityEvent(`Dev tools attempt detected (Key: ${e.key})`);
+    }
+  });
+
+  // Detect tab switching or window focus changes
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && isExamActive) {
+      tabSwitchCount++;
+      const timestamp = new Date().toLocaleString();
+      const logEntry = `Tab switch or focus loss detected at ${timestamp}`;
+      tabSwitchLog.push(logEntry);
+      showNotification(
+        "Warning: Switching tabs or applications is not allowed during the exam.",
+        "warning"
+      );
+      logSecurityEvent(logEntry);
+    }
+  });
+
+  // Detect developer tools being open (basic heuristic)
+  let devToolsOpen = false;
+  const devToolsCheck = () => {
+    const threshold = 160; // Typical height/width difference when dev tools are open
+    const widthDiff = window.outerWidth - window.innerWidth;
+    const heightDiff = window.outerHeight - window.innerHeight;
+    if (widthDiff > threshold || heightDiff > threshold) {
+      if (!devToolsOpen) {
+        devToolsOpen = true;
+        showNotification("Developer tools detected. Please close them to continue.", "error");
+        logSecurityEvent("Developer tools detected");
+      }
+    } else {
+      devToolsOpen = false;
+    }
+  };
+
+  // Check for dev tools periodically
+  if (isExamActive) {
+    setInterval(devToolsCheck, 1000);
+  }
+
+  // Add watermark
+  addWatermark();
+
+  // Prevent text selection and copying
+  document.addEventListener("selectstart", (e) => {
+    e.preventDefault();
+    showNotification("Text selection is disabled during the exam.", "warning");
+    logSecurityEvent("Text selection attempt detected");
+  });
+
+  // Prevent drag-and-drop (e.g., dragging content to snipping tools)
+  document.addEventListener("dragstart", (e) => {
+    e.preventDefault();
+    showNotification("Dragging content is not allowed during the exam.", "warning");
+    logSecurityEvent("Drag attempt detected");
+  });
+}
+
+// Log security events
+function logSecurityEvent(event) {
+  const timestamp = new Date().toLocaleString();
+  securityEventLog.push(`${timestamp}: ${event}`);
+  console.log(`Security Event: ${event}`);
+  // Optionally, send to server if online
+  if (isOnline) {
+    // Example: fetch(`${API_URL}?action=logEvent&event=${encodeURIComponent(event)}`);
+  }
+}
+
+// // Add watermark
+// function addWatermark() {
+//   // Remove existing watermark if any
+//   const existingWatermark = document.querySelector(".watermark");
+//   if (existingWatermark) {
+//     existingWatermark.remove();
+//   }
+
+//   const watermark = document.createElement("div");
+//   watermark.className = "watermark";
+//   watermark.textContent = `Exam ID: ${currentExamId || "YHA"} | User: Anonymous | Do Not Copy`;
+//   document.body.appendChild(watermark);
+// }
+
 // Start exam function
 async function startExam() {
   currentExamId = document.getElementById("examId").value.trim();
@@ -93,15 +213,29 @@ async function startExam() {
     return;
   }
 
-  // Validate exam ID format (basic validation)
+  // Validate exam ID format
   if (currentExamId.length < 2) {
     showNotification("Please enter a valid Exam ID", "error");
     return;
   }
 
+  // Request fullscreen mode
+  if (document.documentElement.requestFullscreen) {
+    try {
+      await document.documentElement.requestFullscreen();
+      showNotification("Exam started in fullscreen mode for security.", "info");
+    } catch (err) {
+      console.error("Fullscreen request failed:", err);
+      showNotification("Fullscreen mode recommended for exam security.", "warning");
+    }
+  }
+
   showLoading();
   examStartTime = new Date();
   currentQuestionIndex = 0;
+  tabSwitchCount = 0;
+  tabSwitchLog = [];
+  securityEventLog = [];
 
   // Initialize timer (1 hour default)
   timeRemaining = 3600;
@@ -132,6 +266,8 @@ function showExamSection() {
   document.getElementById("examSection").style.display = "block";
   document.getElementById("currentExamId").textContent = currentExamId;
   updateProgress();
+  // Reapply watermark
+  addWatermark();
 }
 
 // Timer functions
@@ -162,14 +298,11 @@ function updateTimerDisplay() {
     timerElement.textContent = timerText;
   }
 
-  // Change timer color based on remaining time
   if (timerDisplay) {
     timerDisplay.className = "timer-display";
     if (timeRemaining <= 600) {
-      // 10 minutes
       timerDisplay.classList.add("danger");
     } else if (timeRemaining <= 1200) {
-      // 20 minutes
       timerDisplay.classList.add("warning");
     }
   }
@@ -183,10 +316,8 @@ function updateTimerBar() {
 
     timerBar.className = "timer-bar";
     if (timeRemaining <= 600) {
-      // 10 minutes
       timerBar.classList.add("danger");
     } else if (timeRemaining <= 1200) {
-      // 20 minutes
       timerBar.classList.add("warning");
     }
   }
@@ -275,7 +406,6 @@ async function loadQuestion() {
     totalQuestions = data.totalQuestions;
     document.getElementById("totalQuestionsNum").textContent = totalQuestions;
 
-    // Update question content
     document.getElementById("questionTitle").textContent =
       `Question ${currentQuestionIndex + 1}`;
     document.getElementById("questionContainer").innerHTML = `
@@ -283,7 +413,6 @@ async function loadQuestion() {
       <p>${data.question}</p>
     `;
 
-    // Handle PDF loading with pdf.js
     try {
       await loadPDF(data.pdf_link);
     } catch (pdfError) {
@@ -291,10 +420,7 @@ async function loadQuestion() {
       showNotification("PDF loading failed, but exam can continue", "warning");
     }
 
-    // Handle resource links
     handleResources(data.resource_link);
-
-    // Update navigation
     updateNavigation();
     updateProgress();
 
@@ -328,14 +454,10 @@ async function loadPDF(pdfLink) {
       '<div class="text-center"><div class="spinner"></div><p>Loading PDF...</p></div>';
 
     try {
-      // Load PDF with pdf.js
       const pdf = await pdfjsLib.getDocument(pdfLink).promise;
       const numPages = pdf.numPages;
-      pdfViewer.innerHTML = `
-        
-      `;
+      pdfViewer.innerHTML = "";
 
-      // Render all pages
       for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
         const canvas = document.createElement("canvas");
@@ -350,7 +472,10 @@ async function loadPDF(pdfLink) {
     } catch (error) {
       console.error("PDF Error:", error);
       pdfViewer.innerHTML = `
-        
+        <div class="pdf-fallback">
+          <i class="fas fa-exclamation-triangle"></i>
+          <p>Unable to load PDF. Please check the resource link.</p>
+        </div>
       `;
       showNotification("Error loading PDF", "warning");
     }
@@ -432,6 +557,7 @@ function finishExam() {
   showExamCompletionReport();
 }
 
+// Show exam completion report with security logs
 function showExamCompletionReport() {
   const existingModal = document.getElementById("examReportModal");
   if (existingModal) {
@@ -451,7 +577,7 @@ function showExamCompletionReport() {
   modal.innerHTML = `
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content modern-modal">
-        <div class="modal-header" style="background: var(--primary-gradient); color: white;">
+        <div class="modal-header" style="background: var(--success-gradient); color: white;">
           <i class="fas fa-check-circle" style="font-size: 1.5rem; margin-right: 0.5rem;"></i>
           <h5 class="modal-title">Exam Completed</h5>
         </div>
@@ -470,6 +596,32 @@ function showExamCompletionReport() {
               <span class="label">Total Time:</span>
               <span class="value">${minutes}m ${seconds}s</span>
             </div>
+            <div class="summary-item">
+              <span class="label">Tab Switches Detected:</span>
+              <span class="value">${tabSwitchCount}</span>
+            </div>
+            ${
+              tabSwitchLog.length > 0
+                ? `
+            <div class="summary-item">
+              <span class="label">Tab Switch Log:</span>
+              <div class="value">${tabSwitchLog
+                .map((log) => `<div>${log}</div>`)
+                .join("")}</div>
+            </div>`
+                : ""
+            }
+            ${
+              securityEventLog.length > 0
+                ? `
+            <div class="summary-item">
+              <span class="label">Security Events:</span>
+              <div class="value">${securityEventLog
+                .map((log) => `<div>${log}</div>`)
+                .join("")}</div>
+            </div>`
+                : ""
+            }
           </div>
         </div>
         <div class="modal-footer">
@@ -482,6 +634,11 @@ function showExamCompletionReport() {
   `;
 
   document.body.appendChild(modal);
+
+  // Exit fullscreen mode if active
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(console.error);
+  }
 }
 
 // Restart exam
@@ -503,10 +660,7 @@ function showNotification(message, type = "info") {
 
   document.body.appendChild(toast);
 
-  // Animate in
   setTimeout(() => toast.classList.add("show"), 100);
-
-  // Remove after 3 seconds
   setTimeout(() => {
     toast.classList.remove("show");
     setTimeout(() => toast.remove(), 300);
@@ -523,17 +677,7 @@ function getNotificationIcon(type) {
   return icons[type] || icons.info;
 }
 
-// PDF fullscreen toggle
-// function togglePdfFullscreen() {
-//   const pdfViewer = document.getElementById("pdfViewer");
-//   if (pdfViewer.classList.contains("fullscreen")) {
-//     pdfViewer.classList.remove("fullscreen");
-//   } else {
-//     pdfViewer.classList.add("fullscreen");
-//   }
-// }
-
-// Add notification styles
+// Notification and watermark styles
 const notificationStyles = `
 .notification-toast {
   position: fixed;
@@ -575,6 +719,22 @@ const notificationStyles = `
   background: var(--primary-color);
 }
 
+.watermark {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  font-size: 1.5rem;
+  color: rgba(0, 0, 0, 0.1);
+  pointer-events: none;
+  z-index: 999;
+  white-space: nowrap;
+}
+
+[data-theme="dark"] .watermark {
+  color: rgba(255, 255, 255, 0.1);
+}
+
 .pdf-viewer.fullscreen {
   position: fixed;
   top: 0;
@@ -608,7 +768,7 @@ const notificationStyles = `
 }
 `;
 
-// Inject notification styles
+// Inject styles
 const styleSheet = document.createElement("style");
 styleSheet.textContent = notificationStyles;
 document.head.appendChild(styleSheet);
